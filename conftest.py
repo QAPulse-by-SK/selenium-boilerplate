@@ -36,45 +36,58 @@ def driver(request):
 def driver_class(request):
     """Class-scoped WebDriver — one browser for all tests in a class."""
     from src.helpers.driver_factory import create_driver
-    browser  = os.getenv("BROWSER", BROWSER)
-    headless = os.getenv("HEADLESS", str(HEADLESS)).lower() == "true"
-    _driver  = create_driver(browser=browser, headless=headless)
+    _driver = create_driver(browser=BROWSER, headless=HEADLESS)
     request.cls.driver = _driver
     yield _driver
     _driver.quit()
 
 
 @pytest.fixture(scope="session")
-def driver_session(request):
+def driver_session():
     """Session-scoped WebDriver — one browser for entire session."""
     from src.helpers.driver_factory import create_driver
-    headless = os.getenv("HEADLESS", str(HEADLESS)).lower() == "true"
-    _driver  = create_driver(headless=headless)
+    _driver = create_driver(headless=HEADLESS)
     yield _driver
     _driver.quit()
 
 
 # ── Page Object Fixtures ──────────────────────────────────────────────────────
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def login_page(driver):
     from src.pages.login_page import LoginPage
     return LoginPage(driver)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def home_page(driver):
     from src.pages.home_page import HomePage
     return HomePage(driver)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
+def secure_page(driver):
+    from src.pages.secure_page import SecurePage
+    return SecurePage(driver)
+
+
+@pytest.fixture
 def brand(driver):
     from src.pages.brand_site_page import BrandSitePage
     return BrandSitePage(driver)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
+def pages(driver):
+    """
+    All page objects in one fixture — single import for test files.
+    Usage: def test_flow(pages): pages.login.login(...); pages.secure.is_logged_in()
+    """
+    from src.fixtures.page_fixture import PageFixtures
+    return PageFixtures.create(driver)
+
+
+@pytest.fixture
 def logged_in_driver(driver):
     """Driver with user already logged in."""
     from src.pages.login_page import LoginPage
@@ -82,21 +95,33 @@ def logged_in_driver(driver):
     return driver
 
 
-# ── Helper Fixtures ───────────────────────────────────────────────────────────
+# ── API Fixtures ──────────────────────────────────────────────────────────────
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def api_client():
     from src.api.api_client import ApiClient
     return ApiClient()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
+def api(api_client):
+    """
+    All API endpoints in one fixture.
+    Usage: def test_posts(api): api.posts.get_all()
+    """
+    from src.fixtures.api_fixture import ApiFixtures
+    return ApiFixtures.create(api_client)
+
+
+# ── Helper Fixtures ───────────────────────────────────────────────────────────
+
+@pytest.fixture
 def screenshot_helper(driver):
     from src.helpers.screenshot_helper import ScreenshotHelper
     return ScreenshotHelper(driver)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def a11y_helper(driver):
     from src.helpers.a11y_helper import A11yHelper
     return A11yHelper(driver)
