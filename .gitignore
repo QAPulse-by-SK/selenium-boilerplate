@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test outputs
+reports/
+allure-results/
+allure-report/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Screenshots & baselines
+reports/screenshots/
+tests/visual/baselines/
+
+# Environment
+.env
+*.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# WDM cache
+.wdm/

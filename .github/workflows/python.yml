@@ -1,0 +1,248 @@
+name: Selenium Python Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+
+  # ── Lint & Typecheck ────────────────────────────────────────────────────────
+  quality:
+    name: Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Black — format check
+        run: black --check src/ tests/
+
+      - name: Flake8 — lint
+        run: flake8 src/ tests/ --max-line-length=120 --ignore=E501,W503
+
+  # ── API Tests (no browser) ──────────────────────────────────────────────────
+  api_tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Run API tests
+        run: pytest tests/api/ -v --tb=short --junit-xml=reports/api-results.xml
+        env:
+          API_BASE_URL: https://jsonplaceholder.typicode.com
+
+      - name: Publish API test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: API Test Results
+          path: reports/api-results.xml
+          reporter: java-junit
+          fail-on-error: "false"
+
+      - name: Upload API report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-report
+          path: reports/
+          retention-days: 14
+
+  # ── E2E Tests (Chrome) ──────────────────────────────────────────────────────
+  e2e_tests:
+    name: E2E Tests — Chrome (Shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shardIndex: [1, 2]
+        shardTotal: [2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run E2E tests (Shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }})
+        run: |
+          TOTAL=${{ matrix.shardTotal }}
+          INDEX=${{ matrix.shardIndex }}
+          pytest tests/e2e/ \
+            --headless \
+            --browser=chrome \
+            -n 2 \
+            --tb=short \
+            --junit-xml=reports/e2e-shard-${{ matrix.shardIndex }}.xml \
+            $(python3 -c "
+          import os, glob
+          files = sorted(glob.glob('tests/e2e/test_*.py'))
+          shard = [f for i,f in enumerate(files) if i % $TOTAL == $INDEX - 1]
+          print(' '.join(shard))
+          ")
+        env:
+          BASE_URL:  ${{ vars.BASE_URL || 'https://the-internet.herokuapp.com' }}
+          HEADLESS:  true
+          CI:        true
+
+      - name: Upload shard results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-results-shard-${{ matrix.shardIndex }}
+          path: reports/
+          retention-days: 14
+
+  # ── Merge & Report ──────────────────────────────────────────────────────────
+  reporting:
+    name: Merge Reports & Notify
+    if: always()
+    needs: [api_tests, e2e_tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-report*"
+          merge-multiple: true
+          path: all-reports
+
+      - name: Publish combined test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Selenium Test Results
+          path: "all-reports/**/*.xml"
+          reporter: java-junit
+          fail-on-error: "false"
+
+      # ── Slack Notification ─────────────────────────────────────────────────
+      # To enable: add SLACK_WEBHOOK_URL to GitHub repo secrets
+      - name: Notify Slack — Success
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "✅ *Selenium Tests Passed*",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "✅ Selenium Python Tests Passed" }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Repo:*\n<https://github.com/${{ github.repository }}|${{ github.repository }}>" },
+                    { "type": "mrkdwn", "text": "*Branch:*\n`${{ github.ref_name }}`" },
+                    { "type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}" },
+                    { "type": "mrkdwn", "text": "*Run:*\n<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>" }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    { "type": "mrkdwn", "text": "🎯 *QA Pulse by SK* · <https://www.skakarh.com|skakarh.com>" }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Notify Slack — Failure
+        if: failure() && env.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.0
+        with:
+          payload: |
+            {
+              "text": "❌ *Selenium Tests Failed*",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": { "type": "plain_text", "text": "❌ Selenium Python Tests Failed" }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    { "type": "mrkdwn", "text": "*Repo:*\n<https://github.com/${{ github.repository }}|${{ github.repository }}>" },
+                    { "type": "mrkdwn", "text": "*Branch:*\n`${{ github.ref_name }}`" },
+                    { "type": "mrkdwn", "text": "*Triggered by:*\n${{ github.actor }}" },
+                    { "type": "mrkdwn", "text": "*Run:*\n<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Failed Run>" }
+                  ]
+                },
+                {
+                  "type": "context",
+                  "elements": [
+                    { "type": "mrkdwn", "text": "🎯 *QA Pulse by SK* · <https://www.skakarh.com|skakarh.com>" }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Comment PR with results
+        if: always() && github.event_name == 'pull_request'
+        uses: thollander/actions-comment-pull-request@main
+        with:
+          message: |
+            ## 🐍 Selenium Python Test Results
+            | Suite | Status |
+            |---|---|
+            | API Tests | ${{ needs.api_tests.result }} |
+            | E2E Tests | ${{ needs.e2e_tests.result }} |
+
+            <details>
+            <summary>Run details</summary>
+
+            - **Branch:** `${{ github.ref_name }}`
+            - **Triggered by:** ${{ github.actor }}
+            - **Run:** [View Actions Run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+            </details>
+
+            *Created by **QA Pulse by SK** · [skakarh.com](https://www.skakarh.com)*
+          comment_tag: selenium_results
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

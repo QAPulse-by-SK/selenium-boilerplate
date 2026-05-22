@@ -1,0 +1,146 @@
+pipeline {
+    agent any
+
+    environment {
+        PYTHON_VERSION = '3.12'
+        BASE_URL       = "${env.BASE_URL ?: 'https://the-internet.herokuapp.com'}"
+        BROWSER        = "${env.BROWSER ?: 'chrome'}"
+        HEADLESS       = 'true'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Setup Python') {
+            steps {
+                sh '''
+                    python3 -m venv .venv
+                    . .venv/bin/activate
+                    pip install --upgrade pip
+                    pip install -r requirements-ci.txt
+                '''
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    flake8 src/ tests/ --max-line-length=120 --ignore=E501,W503 || true
+                    black --check src/ tests/ || true
+                '''
+            }
+        }
+
+        stage('API Tests') {
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    mkdir -p reports
+                    pytest tests/api/ -v --tb=short --junit-xml=reports/api-results.xml
+                '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/api-results.xml'
+                }
+            }
+        }
+
+        stage('E2E Smoke Tests') {
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    mkdir -p reports
+                    pytest tests/e2e/ -m smoke \
+                        --headless \
+                        --browser=${BROWSER} \
+                        -n 2 \
+                        --tb=short \
+                        --junit-xml=reports/smoke-results.xml \
+                        --html=reports/smoke-report.html \
+                        --self-contained-html
+                '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/smoke-results.xml'
+                    publishHTML([
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'reports',
+                        reportFiles: 'smoke-report.html',
+                        reportName: 'Selenium Smoke Report'
+                    ])
+                }
+            }
+        }
+
+        stage('E2E Regression Tests') {
+            when { branch 'master' }
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    mkdir -p reports
+                    pytest tests/e2e/ -m regression \
+                        --headless \
+                        --browser=${BROWSER} \
+                        -n 2 \
+                        --tb=short \
+                        --junit-xml=reports/regression-results.xml \
+                        --html=reports/regression-report.html \
+                        --self-contained-html
+                '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/regression-results.xml'
+                    publishHTML([
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: 'reports',
+                        reportFiles: 'regression-report.html',
+                        reportName: 'Selenium Regression Report'
+                    ])
+                    archiveArtifacts artifacts: 'reports/screenshots/**', allowEmptyArchive: true
+                }
+            }
+        }
+
+        stage('Accessibility Tests') {
+            steps {
+                sh '''
+                    . .venv/bin/activate
+                    pytest tests/accessibility/ \
+                        --headless \
+                        -v --tb=short \
+                        --junit-xml=reports/a11y-results.xml || true
+                '''
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'reports/a11y-results.xml'
+                }
+            }
+        }
+
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+            cleanWs()
+        }
+        success {
+            echo '✅ All tests passed — QA Pulse by SK · www.skakarh.com'
+        }
+        failure {
+            echo '❌ Tests failed — check reports for details'
+        }
+    }
+}

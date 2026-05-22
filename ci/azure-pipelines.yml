@@ -1,0 +1,180 @@
+trigger:
+  branches:
+    include:
+      - master
+      - main
+  paths:
+    exclude:
+      - "*.md"
+
+pr:
+  branches:
+    include:
+      - master
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  PYTHON_VERSION: "3.12"
+  BASE_URL: "https://the-internet.herokuapp.com"
+  HEADLESS: "true"
+
+stages:
+
+  - stage: QualityChecks
+    displayName: Lint & Format Check
+    jobs:
+      - job: Lint
+        displayName: Black + Flake8
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+            displayName: Setup Python
+
+          - script: pip install -r requirements-dev.txt
+            displayName: Install dev dependencies
+
+          - script: black --check src/ tests/
+            displayName: Black format check
+            continueOnError: true
+
+          - script: flake8 src/ tests/ --max-line-length=120 --ignore=E501,W503
+            displayName: Flake8 lint
+            continueOnError: true
+
+  - stage: ApiTests
+    displayName: API Tests
+    dependsOn: QualityChecks
+    jobs:
+      - job: Api
+        displayName: API Tests (no browser)
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+
+          - script: pip install -r requirements-ci.txt
+            displayName: Install dependencies
+
+          - script: |
+              mkdir -p reports
+              pytest tests/api/ -v --tb=short --junit-xml=reports/api-results.xml
+            displayName: Run API tests
+            env:
+              API_BASE_URL: https://jsonplaceholder.typicode.com
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/api-results.xml
+              testRunTitle: API Tests
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            inputs:
+              targetPath: reports
+              artifact: api-reports
+
+  - stage: SmokeTests
+    displayName: E2E Smoke Tests
+    dependsOn: ApiTests
+    jobs:
+      - job: Smoke
+        displayName: Smoke — Chrome
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+
+          - script: pip install -r requirements-ci.txt
+            displayName: Install dependencies
+
+          - script: |
+              mkdir -p reports
+              pytest tests/e2e/ -m smoke \
+                --headless \
+                --browser=chrome \
+                -n 2 \
+                --tb=short \
+                --junit-xml=reports/smoke-results.xml \
+                --html=reports/smoke-report.html \
+                --self-contained-html
+            displayName: Run smoke tests
+            env:
+              BASE_URL: $(BASE_URL)
+              HEADLESS: $(HEADLESS)
+              CI: true
+
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/smoke-results.xml
+              testRunTitle: Smoke Tests
+
+          - task: PublishPipelineArtifact@1
+            condition: always()
+            inputs:
+              targetPath: reports
+              artifact: smoke-reports
+
+  - stage: RegressionTests
+    displayName: Full Regression
+    dependsOn: SmokeTests
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+    jobs:
+      - job: Regression_Chrome
+        displayName: Regression — Chrome
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+          - script: pip install -r requirements-ci.txt
+            displayName: Install dependencies
+          - script: |
+              mkdir -p reports
+              pytest tests/ -m regression \
+                --headless --browser=chrome -n 2 \
+                --tb=short \
+                --junit-xml=reports/regression-chrome.xml
+            displayName: Chrome regression
+            env:
+              BASE_URL: $(BASE_URL)
+              HEADLESS: $(HEADLESS)
+              CI: true
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/regression-chrome.xml
+              testRunTitle: Regression — Chrome
+
+      - job: Regression_Firefox
+        displayName: Regression — Firefox
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(PYTHON_VERSION)
+          - script: pip install -r requirements-ci.txt
+            displayName: Install dependencies
+          - script: |
+              mkdir -p reports
+              pytest tests/ -m regression \
+                --headless --browser=firefox -n 2 \
+                --tb=short \
+                --junit-xml=reports/regression-firefox.xml
+            displayName: Firefox regression
+            env:
+              BASE_URL: $(BASE_URL)
+              HEADLESS: $(HEADLESS)
+              CI: true
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: JUnit
+              testResultsFiles: reports/regression-firefox.xml
+              testRunTitle: Regression — Firefox

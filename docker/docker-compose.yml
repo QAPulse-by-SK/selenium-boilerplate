@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+
+  # ── Run all tests ─────────────────────────────────────────────────────────
+  tests:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - BASE_URL=${BASE_URL:-https://the-internet.herokuapp.com}
+      - BROWSER=${BROWSER:-chrome}
+      - HEADLESS=true
+    volumes:
+      - ../reports:/app/reports
+      - ../allure-results:/app/allure-results
+
+  # ── Smoke tests only ──────────────────────────────────────────────────────
+  smoke:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["pytest", "tests/", "-m", "smoke", "--headless", "-n", "2", "--tb=short"]
+    environment:
+      - BASE_URL=${BASE_URL:-https://the-internet.herokuapp.com}
+      - HEADLESS=true
+    volumes:
+      - ../reports:/app/reports
+
+  # ── API tests only (no browser) ───────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["pytest", "tests/api/", "-v", "--tb=short"]
+    environment:
+      - API_BASE_URL=${API_BASE_URL:-https://jsonplaceholder.typicode.com}
+
+  # ── Selenium Grid hub ─────────────────────────────────────────────────────
+  selenium-hub:
+    image: selenium/hub:4.18.1
+    ports:
+      - "4442:4442"
+      - "4443:4443"
+      - "4444:4444"
+
+  chrome-node:
+    image: selenium/node-chrome:4.18.1
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+    depends_on:
+      - selenium-hub
+
+  firefox-node:
+    image: selenium/node-firefox:4.18.1
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+    depends_on:
+      - selenium-hub
+
+  # ── Tests against Grid ────────────────────────────────────────────────────
+  grid-tests:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["pytest", "tests/e2e/", "--headless", "-n", "2", "--tb=short"]
+    environment:
+      - BASE_URL=${BASE_URL:-https://the-internet.herokuapp.com}
+      - REMOTE_URL=http://selenium-hub:4444/wd/hub
+      - GRID_ENABLED=true
+      - HEADLESS=true
+    depends_on:
+      - selenium-hub
+      - chrome-node
+    volumes:
+      - ../reports:/app/reports
