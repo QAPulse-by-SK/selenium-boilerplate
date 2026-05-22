@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# QA Pulse by SK — Selenium Boilerplate
+# Dev/tooling dependencies
+# Install: bash req_scripts/install_requirements.sh --dev
+# ─────────────────────────────────────────────────────────────────────────────
+
+-r requirements.txt
+
+# ── Code Quality ──────────────────────────────────────────────────────────────
+black==24.3.0
+flake8==7.0.0
+mypy==1.9.0
+isort==5.13.2
+pre-commit==3.7.0
+
+# ── Type Stubs ────────────────────────────────────────────────────────────────
+types-requests==2.31.0.20240310
+types-PyYAML==6.0.12.20240311

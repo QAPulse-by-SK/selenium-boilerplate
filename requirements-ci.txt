@@ -1,0 +1,10 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# QA Pulse by SK — Selenium Boilerplate
+# CI-only dependencies — minimal, fast install
+# Install: pip install -r requirements-ci.txt
+# ─────────────────────────────────────────────────────────────────────────────
+
+-r requirements.txt
+
+# ── CI Extras ─────────────────────────────────────────────────────────────────
+pytest-github-actions-annotate-failures==0.2.0

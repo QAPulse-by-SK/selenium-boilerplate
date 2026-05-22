@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# QA Pulse by SK — Selenium Boilerplate
+# config.yaml — default configuration (overridden by .env)
+# ─────────────────────────────────────────────────────────────────────────────
+
+BASE_URL: https://the-internet.herokuapp.com
+BRAND_URL: https://www.skakarh.com
+API_BASE_URL: https://jsonplaceholder.typicode.com
+
+BROWSER: chrome
+HEADLESS: false
+
+IMPLICIT_WAIT: 10
+EXPLICIT_WAIT: 20
+PAGE_LOAD_TIMEOUT: 30
+
+TEST_USERNAME: tomsmith
+TEST_PASSWORD: SuperSecretPassword!
+
+SCREENSHOT_DIR: reports/screenshots
+ENVIRONMENT: local
